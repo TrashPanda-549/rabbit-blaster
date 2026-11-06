@@ -27,11 +27,22 @@ consumer IR codes from Flipper Zero `.ir` files through the on-board IR LED.
 
 ## Status
 
-- [x] IR engine, tested on hardware: NEC / Samsung32 / SIRC / RC5 / raw all
-      transmit via `/dev/lirc0`.
-- [ ] Framebuffer UI + keyboard navigation.
-- [ ] APPLaunch boot-screen entry + install (group perms, icon).
-- [ ] RC6 / Kaseikyo validation; bundled remote database.
+- [x] IR engine: NEC / NECext / Samsung32 / SIRC / RC5 / RC6 / raw all
+      transmit via `/dev/lirc0` without error on real hardware.
+- [x] Framebuffer UI (320x170) + Cardputer keyboard navigation (evdev).
+- [x] APPLaunch boot-screen entry + `install.sh` (icon, `video`/`input` groups).
+- [x] Universal TV remote installed (`TV_Universal`, 752 transmittable codes).
+- [ ] Confirm a real appliance responds (needs a device + its codes in front of it).
+- [ ] Validate RC6 / add Kaseikyo, RCA encoders (currently skipped, shown with `!`).
+
+## Install (on the device)
+
+    git clone / copy this tree to the Cardputer, then:
+    bash tools/install.sh
+    # reboot so it appears on the boot screen and group access activates
+
+Add your own remotes: drop Flipper `.ir` files in `~/.rabbit-blaster/remotes`
+or `/usr/share/rabbit-blaster/remotes`.
 
 ## CLI usage
 
