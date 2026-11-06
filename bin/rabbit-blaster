@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Rabbit Blaster launcher (invoked by APPLaunch via its .desktop entry).
+# Runs the Python app with the installed package on PYTHONPATH. If group
+# access to the framebuffer isn't active yet (e.g. right after install,
+# before re-login), fall back to passwordless sudo so it still works.
+export PYTHONPATH="/usr/share/rabbit-blaster:${PYTHONPATH}"
+if [ -w /dev/fb0 ] 2>/dev/null; then
+  exec python3 -m rabbitblaster.app "$@"
+else
+  exec sudo -n env PYTHONPATH="/usr/share/rabbit-blaster:${PYTHONPATH}" \
+       python3 -m rabbitblaster.app "$@"
+fi
