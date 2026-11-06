@@ -1,0 +1,38 @@
+Filetype: IR signals file
+Version: 1
+#
+name: Power
+type: parsed
+protocol: NEC
+address: 04 00 00 00
+command: 08 00 00 00
+#
+name: Vol_up
+type: parsed
+protocol: NEC
+address: 04 00 00 00
+command: 02 00 00 00
+#
+name: Samsung_Power
+type: parsed
+protocol: Samsung32
+address: 07 00 00 00
+command: 02 00 00 00
+#
+name: Sony_Power
+type: parsed
+protocol: SIRC
+address: 01 00 00 00
+command: 15 00 00 00
+#
+name: Philips_Power
+type: parsed
+protocol: RC5
+address: 00 00 00 00
+command: 0C 00 00 00
+#
+name: Raw_Blip
+type: raw
+frequency: 38000
+duty_cycle: 0.330000
+data: 9000 4500 560 1690 560 560 560 1690 560 560 560 1690 560 560 560
