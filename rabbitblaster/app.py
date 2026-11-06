@@ -89,7 +89,7 @@ class App:
     MIN_SEND_GAP = 1.5
     SETTLE_S = 0.3   # power-on -> send delay so inrush and LED burst don't coincide
 
-    def __init__(self, fb, keypad, remotes, device=irsend.DEFAULT_DEVICE, repeats=1):
+    def __init__(self, fb, keypad, remotes, device=irsend.DEFAULT_DEVICE, repeats=2):
         self.fb = fb
         self.kp = keypad
         self.remotes = remotes
@@ -260,7 +260,7 @@ def main(argv=None):
     ap.add_argument("--fb", default="/dev/fb0")
     ap.add_argument("--keyboard", default=None)
     ap.add_argument("--device", default=irsend.DEFAULT_DEVICE)
-    ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument("--repeats", type=int, default=2)
     ap.add_argument("--remotes", default=None)
     ap.add_argument("--screenshot", default=None)
     ap.add_argument("--screen", choices=["home", "brands", "devices", "functions"],

@@ -45,8 +45,23 @@ class Signal:
     def render(self):
         """Return (carrier_hz, durations[us]). Raises if not transmittable."""
         if self.type == "raw":
-            durs = list(self.data)
-            if len(durs) % 2 == 0:      # ir-ctl wants pulse-terminated
+            durs = [max(1, int(v)) for v in self.data]
+            # LIRC refuses transmissions over 500 ms total, and Flipper raw
+            # captures often hold several repeated frames separated by long
+            # gaps. Keep only the first frame: cut at the first inter-frame
+            # gap (a space > 20 ms). Repeats are added by irsend if wanted.
+            for i in range(1, len(durs), 2):        # spaces sit at odd indices
+                if durs[i] > 20000:
+                    durs = durs[:i]                 # ends on the pulse before it
+                    break
+            total, keep = 0, len(durs)              # hard cap well under 500 ms
+            for i, v in enumerate(durs):
+                total += v
+                if total > 450000:
+                    keep = i
+                    break
+            durs = durs[:keep]
+            if len(durs) % 2 == 0:                  # ir-ctl wants pulse-terminated
                 durs = durs[:-1]
             return int(self.frequency), durs
         return irproto.encode(self.protocol, self.address, self.command)
