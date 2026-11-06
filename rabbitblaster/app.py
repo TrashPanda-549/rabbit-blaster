@@ -158,8 +158,8 @@ class App:
             items, enabled, idx = page.view()
             if page.sel >= len(items):
                 page.sel = max(0, len(items) - 1)
-            hint = ("type filter  OK pick  <-/ESC back" if page.filterable
-                    else "OK pick  <-/ESC back")
+            hint = ("type=filter  Tab move  OK  ESC back" if page.filterable
+                    else "Tab/arrows move  OK pick  ESC back")
             self.fb.show(ui.list_screen(page.title, items, page.sel,
                                         subtitle=page.subtitle(), enabled=enabled,
                                         hint=hint))

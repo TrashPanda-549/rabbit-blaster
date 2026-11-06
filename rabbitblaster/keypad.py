@@ -56,15 +56,25 @@ def find_keyboard() -> str:
 class Keypad:
     def __init__(self, path: str | None = None):
         self.dev = InputDevice(path or find_keyboard())
+        self._shift = False
 
     def wait(self):
+        # On this keyboard the arrows are an Fn layer we can't see as KEY_UP,
+        # so base-layer Tab / Shift+Tab drive up/down with no Fn needed.
         for event in self.dev.read_loop():
             if event.type != ecodes.EV_KEY:
                 continue
             code, val = event.code, event.value
+            if code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
+                self._shift = val != 0
+                continue
             if code in _NAV:
                 if val in (1, 2):           # press or auto-repeat
                     return ("nav", _NAV[code])
+                continue
+            if code == ecodes.KEY_TAB:
+                if val in (1, 2):
+                    return ("nav", "UP" if self._shift else "DOWN")
                 continue
             if val != 1:                    # the rest fire on press only
                 continue
