@@ -1,14 +1,16 @@
-"""External IR-board power control for the Cardputer Zero.
+"""External IR-board power control: Cardputer Zero + Rabbit Labs COBRA Commander.
 
-The Rabbit Labs IR board draws VCC from the ADV-compatible connector's
-switched 5V. Powering it requires: ext_usb_gpio_fun=0, ext_5v_out=1,
-grove_5v_out=1, and GPIO26 driven HIGH and held.
+The COBRA Commander is a 5V board (10 high-power IR LEDs). It draws power from
+the expansion header's switched 5V: ext_usb_gpio_fun=0, ext_5v_out=1,
+grove_5v_out=1, and GPIO26 driven HIGH and held for the app's lifetime.
 
-SAFETY INTERLOCK: the board's IR LED is active-low. If gpio-ir-tx is NOT
-configured active-low (invert=1), the idle-low line holds the LED on and it
-overheats. enable() therefore reads the *running* device tree and refuses to
-power the board unless the IR transmitter is confirmed active-low. It fails
-safe: any uncertainty -> no power.
+Its IR-TX line is Pi GPIO14 and is ACTIVE-HIGH: the LED ring is ON while the
+line is high. Anything that leaves GPIO14 high at idle (the mini-UART idles
+high, for one) holds the ring at full 5V and overheats it.
+
+SAFETY INTERLOCK: enable() reads the *running* device tree and refuses to power
+the board unless gpio-ir-tx is on GPIO14 and active-high (idle LOW = ring off).
+It fails safe: any uncertainty -> no power.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import struct
 import sys
 
 _PWR_GPIO = 26
+_IR_TX_GPIO = 14
 _RAILS_ON = (
     ("/sys/class/leds/ext_usb_gpio_fun/brightness", "0"),
     ("/sys/class/leds/ext_5v_out/brightness", "1"),
@@ -30,12 +33,8 @@ _req = None
 _chip = None
 
 
-def ir_is_active_low() -> bool:
-    """True only if the running gpio-ir-tx uses GPIO_ACTIVE_LOW (invert=1).
-
-    The gpios property is <phandle pin flags>; flags bit0 = active-low.
-    Fail-safe: returns False on anything unexpected.
-    """
+def ir_tx_config():
+    """Return (pin, active_low) of the running gpio-ir-tx, or None."""
     nodes = glob.glob("/proc/device-tree/gpio-ir-transmitter*/gpios")
     nodes += glob.glob("/proc/device-tree/*/gpio-ir-transmitter*/gpios")
     for node in nodes:
@@ -44,11 +43,16 @@ def ir_is_active_low() -> bool:
             if len(data) < 12 or len(data) % 4:
                 continue
             cells = struct.unpack(">%dI" % (len(data) // 4), data)
-            if cells[-1] & 1:
-                return True
+            return cells[-2], bool(cells[-1] & 1)
         except Exception:
             continue
-    return False
+    return None
+
+
+def ir_tx_safe() -> bool:
+    """True only if gpio-ir-tx is on GPIO14 and active-high (idle low)."""
+    cfg = ir_tx_config()
+    return cfg is not None and cfg[0] == _IR_TX_GPIO and not cfg[1]
 
 
 def _write(path, val):
@@ -62,35 +66,41 @@ def _write(path, val):
 
 
 def enable() -> bool:
-    """Power the board, but only if the IR line is confirmed active-low."""
+    """Power the board, but only if the IR line is confirmed safe at idle."""
     global _req, _chip
-    if not ir_is_active_low():
-        print("power: REFUSING to power board - gpio-ir-tx is not active-low "
-              "(invert=1 not active in the running config). Set invert=1 and "
-              "reboot first. Board left unpowered (safe).", file=sys.stderr)
+    if not ir_tx_safe():
+        print("power: REFUSING to power the board - gpio-ir-tx is not on GPIO14 "
+              "active-high (cfg=%s). The ring would be held on and overheat. "
+              "Fix config.txt and reboot. Board left unpowered (safe)."
+              % (ir_tx_config(),), file=sys.stderr)
         return False
-    for path, val in _RAILS_ON:
-        _write(path, val)
+    # Claim the enable line FIRST. If another instance already owns board
+    # power, this fails and we must not touch the rails it depends on.
     try:
         import gpiod
         from gpiod.line import Direction, Value
         _chip = gpiod.Chip("/dev/gpiochip0")
         s = gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE)
         _req = _chip.request_lines(config={_PWR_GPIO: s}, consumer="rabbit-blaster")
-        print("power: board enabled (rails on, GPIO26 high, IR active-low).")
-        return True
     except Exception as e:
-        print("power: GPIO26 request failed: %s" % e, file=sys.stderr)
-        # back the rails off if we couldn't hold the enable line
-        disable()
+        print("power: GPIO26 unavailable (%s) - another instance likely owns board "
+              "power; rails left untouched." % e, file=sys.stderr)
+        _req = None
+        _chip = None
         return False
+    for path, val in _RAILS_ON:
+        _write(path, val)
+    print("power: board enabled (5V rails on, GPIO26 high; IR idles low).")
+    return True
 
 
 def disable():
-    """Cut board power: release GPIO26 and switch the 5V rails off."""
+    """Cut board power: drive GPIO26 low, release it, switch the 5V rails off."""
     global _req, _chip
     try:
         if _req is not None:
+            from gpiod.line import Value
+            _req.set_value(_PWR_GPIO, Value.INACTIVE)
             _req.release()
     except Exception:
         pass

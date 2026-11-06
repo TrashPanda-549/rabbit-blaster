@@ -6,9 +6,20 @@ consumer IR codes from Flipper Zero `.ir` files through the on-board IR LED.
 
 ## Device facts (discovered)
 
-- **IR transmit:** kernel `gpio-ir-tx` on **GPIO12** → `/dev/lirc0` (TX).
-  Receiver is `gpio-ir` on GPIO13 → `/dev/lirc1`. `ir-ctl` 1.30.1 is installed.
-  `/dev/lirc0` is `root:video` (app needs the `video` group or root).
+- **IR board:** Rabbit Labs **COBRA Commander** (10 high-power IR LEDs, a
+  **5V** board) on the ADV-compatible expansion header. Its IR-TX line is
+  **Pi GPIO14, active-high** (ring ON while high); IR-RX is **GPIO15**.
+  `config.txt`: `enable_uart=0` (frees GPIO14/15 from the mini-UART, whose
+  idle-high was holding the ring on), `dtoverlay=gpio-ir-tx,gpio_pin=14`
+  (no invert), `dtoverlay=gpio-ir,gpio_pin=15,gpio_pull=up`.
+  → `/dev/lirc0` TX, `/dev/lirc1` RX. `ir-ctl` 1.30.1 installed.
+- **Board power:** switched 5V = `ext_usb_gpio_fun=0`, `ext_5v_out=1`,
+  `grove_5v_out=1` (LED-class sysfs) **plus GPIO26 held HIGH**. The app
+  applies it **only for the ~100 ms around each send** and never at idle;
+  `power.enable()` refuses unless gpio-ir-tx is on GPIO14 active-high.
+- **Do not rapid-fire sends:** the LED driver latches on if frames are fired
+  back-to-back (overheats, browns out the unit). The app enforces a 1.5 s
+  cooldown and one frame per press. The original GPIO12 default was wrong.
 - **Display:** `/dev/fb0` = `panel-mipi-dbid`, **320×170, 16bpp RGB565**, stride 640.
 - **Keyboard:** `tca8418c` matrix at `/dev/input/cardputer-zero-internal`
   (event3), read via evdev. (`input` group needed.)

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Rabbit Blaster launcher (invoked by APPLaunch via its .desktop entry).
-# Board power (5V rails + GPIO26) needs root, so run the power-managed
-# wrapper under passwordless sudo: it powers the external IR board on start
-# (only if the IR line is confirmed active-low) and cuts power on exit.
+# Powers the Rabbit Labs COBRA Commander (5V) for the app's lifetime via the
+# power-managed wrapper; root is needed for the 5V rails + GPIO26. The wrapper's
+# interlock refuses to power the board unless gpio-ir-tx is on GPIO14
+# active-high (idle low = LED ring off), so a bad config can't overheat it.
 export PYTHONPATH="/usr/share/rabbit-blaster:${PYTHONPATH}"
 exec sudo -n env PYTHONPATH="/usr/share/rabbit-blaster:${PYTHONPATH}" \
      python3 -m rabbitblaster.run_with_power "$@"

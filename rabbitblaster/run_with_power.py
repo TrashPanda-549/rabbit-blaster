@@ -1,7 +1,9 @@
-"""Launch wrapper: power the external IR board for the app's lifetime only.
+"""Launch wrapper (runs as root via the launcher's sudo).
 
-Enables board power (guarded by the active-low interlock in power.enable),
-runs the app, and cuts power on exit no matter how the app ends.
+Board power is applied by the app itself only for the ~100 ms around each
+send (see App._activate) and is never held while idle. This wrapper just runs
+the app and, as a belt-and-braces measure, forces the board unpowered on exit
+no matter how the app ends.
 """
 
 from __future__ import annotations
@@ -13,11 +15,6 @@ from .app import main
 
 
 def run(argv=None):
-    powered = power.enable()
-    if not powered:
-        print("run_with_power: board not powered (see above); the UI still "
-              "runs but sends won't reach the board until invert=1 is active.",
-              file=sys.stderr)
     try:
         return main(sys.argv[1:] if argv is None else argv)
     finally:

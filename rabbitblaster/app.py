@@ -13,7 +13,7 @@ import glob
 import os
 import time
 
-from . import flipperir, irdb, irsend, ui
+from . import flipperir, irdb, irsend, power, ui
 
 
 # --------------------------------------------------------------------------
@@ -84,12 +84,17 @@ class Page:
 
 
 class App:
-    def __init__(self, fb, keypad, remotes, device=irsend.DEFAULT_DEVICE, repeats=2):
+    # The COBRA Commander's 10-LED driver latches on if sends are fired
+    # back-to-back; enforce a cooldown so the ring is never held on.
+    MIN_SEND_GAP = 1.5
+
+    def __init__(self, fb, keypad, remotes, device=irsend.DEFAULT_DEVICE, repeats=1):
         self.fb = fb
         self.kp = keypad
         self.remotes = remotes
         self.device = device
         self.repeats = repeats
+        self._last_send = 0.0
 
     # -- page builders --
     def home(self):
@@ -198,8 +203,19 @@ class App:
             stack.append(action[1])
         elif action[0] == "transmit":
             carrier, durs, label = action[1]
+            if time.time() - self._last_send < self.MIN_SEND_GAP:
+                self._flash("Wait", "cooling down", ui.ACCENT)
+                return
+            # The board is powered ONLY for the duration of a send, never at
+            # idle: enable (interlock-checked) -> transmit -> cut power.
             try:
-                irsend.send(carrier, durs, device=self.device, repeats=self.repeats)
+                if not power.enable():
+                    raise irsend.IRError("board power refused by interlock")
+                try:
+                    irsend.send(carrier, durs, device=self.device, repeats=self.repeats)
+                finally:
+                    power.disable()
+                self._last_send = time.time()
                 self._flash("SENT", label, ui.ACCENT2)
             except irsend.IRError as e:
                 self._flash("TX ERROR", str(e), ui.ACCENT)
@@ -240,7 +256,7 @@ def main(argv=None):
     ap.add_argument("--fb", default="/dev/fb0")
     ap.add_argument("--keyboard", default=None)
     ap.add_argument("--device", default=irsend.DEFAULT_DEVICE)
-    ap.add_argument("--repeats", type=int, default=2)
+    ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--remotes", default=None)
     ap.add_argument("--screenshot", default=None)
     ap.add_argument("--screen", choices=["home", "brands", "devices", "functions"],
