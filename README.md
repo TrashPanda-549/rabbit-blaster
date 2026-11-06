@@ -22,8 +22,23 @@ consumer IR codes from Flipper Zero `.ir` files through the on-board IR LED.
   Implemented: NEC, NECext, Samsung32, Sony SIRC 12/15/20, RC5, RC6(mode0).
 - `rabbitblaster/flipperir.py` — parse Flipper `.ir` files (`parsed` + `raw`).
 - `rabbitblaster/irsend.py` — transmit via `ir-ctl --send` on `/dev/lirc0`.
-- `rabbitblaster/sendcli.py` — headless CLI for testing the engine.
-- `rabbitblaster/ui.py`, `app.py` — framebuffer UI + evdev input (in progress).
+- `rabbitblaster/irdb.py` — read the probonopd/irdb CSV tree (brand -> device ->
+  function) and render parametric codes via `irproto`.
+- `rabbitblaster/ui.py` — PIL screens (320x170).
+- `rabbitblaster/keypad.py` — evdev -> nav + type-to-filter characters.
+- `rabbitblaster/app.py` — navigation stack: Home -> IRDB brands -> devices ->
+  functions, plus Flipper `.ir` remotes; transmit on select.
+- `rabbitblaster/sendcli.py` — headless CLI for testing `.ir` files.
+
+## Code sources
+
+- **irdb** (probonopd/irdb): ~114k codes across 648 brands, stored parametrically
+  (protocol + device/subdevice/function). Rendered on the fly. **73% (83.5k codes)
+  transmittable now** — NEC family, RC5, RC6, Sony 12/15/20, JVC. The rest
+  (Mitsubishi, Aiwa, MCE, Panasonic/Kaseikyo, Denon, Pioneer, …) are shown with a
+  `!` until their encoders are added. `python3 -m rabbitblaster.irdb` prints coverage.
+- **Flipper `.ir` files**: dropped in `~/.rabbit-blaster/remotes` or
+  `/usr/share/rabbit-blaster/remotes` (a universal TV remote is bundled).
 
 ## Status
 
@@ -32,8 +47,12 @@ consumer IR codes from Flipper Zero `.ir` files through the on-board IR LED.
 - [x] Framebuffer UI (320x170) + Cardputer keyboard navigation (evdev).
 - [x] APPLaunch boot-screen entry + `install.sh` (icon, `video`/`input` groups).
 - [x] Universal TV remote installed (`TV_Universal`, 752 transmittable codes).
+- [x] Full irdb integration: Home -> brand -> device -> function browser with
+      type-to-filter; 83.5k/114k codes renderable; real power codes for
+      Sony/Samsung/LG/Philips/Panasonic/Vizio/Toshiba verified transmitting.
 - [ ] Confirm a real appliance responds (needs a device + its codes in front of it).
-- [ ] Validate RC6 / add Kaseikyo, RCA encoders (currently skipped, shown with `!`).
+- [ ] Add encoders for the long tail (Mitsubishi, Aiwa, MCE/RC6A, Panasonic/Kaseikyo,
+      Denon, Pioneer, RECS80, Proton, RCA, Sharp, …) to raise coverage past 73%.
 
 ## Install (on the device)
 

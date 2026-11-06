@@ -1,4 +1,12 @@
-"""Map Cardputer Zero keyboard (tca8418c) evdev events to logical buttons."""
+"""Cardputer Zero keyboard (tca8418c) -> UI events via evdev.
+
+wait() returns a (kind, value) tuple:
+    ("nav", "UP"|"DOWN"|"LEFT"|"RIGHT")   arrow keys (auto-repeat)
+    ("ok", None)                          Enter
+    ("back", None)                        Esc
+    ("bksp", None)                        Backspace
+    ("char", "<c>")                       a printable key (for type-to-filter)
+"""
 
 from __future__ import annotations
 
@@ -6,24 +14,27 @@ import glob
 
 from evdev import InputDevice, ecodes
 
-UP, DOWN, LEFT, RIGHT, OK, BACK, QUIT = "UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "QUIT"
-
-_MAP = {
-    ecodes.KEY_UP: UP,
-    ecodes.KEY_DOWN: DOWN,
-    ecodes.KEY_LEFT: LEFT,
-    ecodes.KEY_RIGHT: RIGHT,
-    ecodes.KEY_ENTER: OK,
-    ecodes.KEY_KPENTER: OK,
-    ecodes.KEY_SPACE: OK,
-    ecodes.KEY_ESC: BACK,
-    ecodes.KEY_BACKSPACE: BACK,
-    ecodes.KEY_Q: QUIT,
+_NAV = {
+    ecodes.KEY_UP: "UP",
+    ecodes.KEY_DOWN: "DOWN",
+    ecodes.KEY_LEFT: "LEFT",
+    ecodes.KEY_RIGHT: "RIGHT",
 }
 
-_DEFAULT_PATHS = [
-    "/dev/input/cardputer-zero-internal",
-]
+_CHARS = {}
+for _ch in "abcdefghijklmnopqrstuvwxyz":
+    _code = getattr(ecodes, "KEY_" + _ch.upper(), None)
+    if _code is not None:
+        _CHARS[_code] = _ch
+for _d in "0123456789":
+    _code = getattr(ecodes, "KEY_" + _d, None)
+    if _code is not None:
+        _CHARS[_code] = _d
+_CHARS[ecodes.KEY_SPACE] = " "
+_CHARS[ecodes.KEY_MINUS] = "-"
+_CHARS[ecodes.KEY_DOT] = "."
+
+_DEFAULT_PATHS = ["/dev/input/cardputer-zero-internal"]
 
 
 def find_keyboard() -> str:
@@ -35,8 +46,7 @@ def find_keyboard() -> str:
             pass
     for p in sorted(glob.glob("/dev/input/event*")):
         try:
-            d = InputDevice(p)
-            if "tca8418" in (d.name or "").lower():
+            if "tca8418" in (InputDevice(p).name or "").lower():
                 return p
         except Exception:
             continue
@@ -48,22 +58,24 @@ class Keypad:
         self.dev = InputDevice(path or find_keyboard())
 
     def wait(self):
-        """Block until a mapped button is pressed; return its logical name.
-
-        Navigation keys repeat (auto-repeat held key); OK/BACK/QUIT fire on
-        the initial press only.
-        """
         for event in self.dev.read_loop():
             if event.type != ecodes.EV_KEY:
                 continue
-            btn = _MAP.get(event.code)
-            if btn is None:
+            code, val = event.code, event.value
+            if code in _NAV:
+                if val in (1, 2):           # press or auto-repeat
+                    return ("nav", _NAV[code])
                 continue
-            if btn in (UP, DOWN, LEFT, RIGHT):
-                if event.value in (1, 2):   # press or auto-repeat
-                    return btn
-            elif event.value == 1:          # press only
-                return btn
+            if val != 1:                    # the rest fire on press only
+                continue
+            if code in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER):
+                return ("ok", None)
+            if code == ecodes.KEY_ESC:
+                return ("back", None)
+            if code == ecodes.KEY_BACKSPACE:
+                return ("bksp", None)
+            if code in _CHARS:
+                return ("char", _CHARS[code])
 
     def close(self):
         try:

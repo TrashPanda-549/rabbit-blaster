@@ -83,6 +83,22 @@ def samsung32(address, command):
     return 38000, _finish(durs)
 
 
+def build_nec(device, subdevice, function):
+    """NEC with explicit device/subdevice/function (irdb semantics).
+    subdevice < 0 means 'not given' -> use ~device as the second byte."""
+    s = subdevice if (subdevice is not None and subdevice >= 0) else (~device) & 0xFF
+    bits = (_lsb_bits(device & 0xFF) + _lsb_bits(s & 0xFF)
+            + _lsb_bits(function & 0xFF) + _lsb_bits((~function) & 0xFF))
+    durs = _pulse_distance([9000, 4500], bits, 1690, 560, 560)
+    return 38000, _finish(durs)
+
+
+def jvc(device, function):
+    bits = _lsb_bits(device & 0xFF) + _lsb_bits(function & 0xFF)
+    durs = _pulse_distance([8400, 4200], bits, 1578, 526, 526)
+    return 38000, _finish(durs)
+
+
 # --------------------------------------------------------------------------
 # Sony SIRC (pulse-width coded, 40 kHz, send 3 frames)
 # --------------------------------------------------------------------------

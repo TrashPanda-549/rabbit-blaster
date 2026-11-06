@@ -14,6 +14,18 @@ for f in "$HERE"/share/remotes/*.ir; do
   [ -e "$f" ] && sudo cp -n "$f" "$PREFIX/remotes/" || true
 done
 
+echo "[*] irdb code database"
+IRDB_SRC="$HOME/irdb"
+if [ ! -d "$IRDB_SRC/codes" ] && [ ! -d "$PREFIX/irdb/codes" ]; then
+  echo "    cloning probonopd/irdb (~24MB)..."
+  git clone --depth 1 https://github.com/probonopd/irdb.git "$IRDB_SRC" \
+    || echo "    irdb clone failed; app still works with .ir remotes"
+fi
+if [ -d "$IRDB_SRC/codes" ]; then
+  sudo ln -sfn "$IRDB_SRC" "$PREFIX/irdb"   # system path -> user clone
+  echo "    linked $PREFIX/irdb -> $IRDB_SRC"
+fi
+
 echo "[*] launcher + desktop entry -> $APPROOT"
 sudo install -m 755 "$HERE/bin/rabbit-blaster" "$APPROOT/bin/rabbit-blaster"
 sudo python3 "$HERE/tools/make_icon.py" "$APPROOT/share/images/rabbit-blaster.png"

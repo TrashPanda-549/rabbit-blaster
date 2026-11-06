@@ -1,11 +1,9 @@
 """Rabbit Blaster main app: framebuffer UI + Cardputer keyboard to browse
-Flipper .ir remotes and transmit codes on /dev/lirc0.
+the irdb database (648 brands) and Flipper .ir remotes, and transmit on
+/dev/lirc0.
 
-Run on the device (needs access to /dev/fb0, the keyboard, and /dev/lirc0):
     python3 -m rabbitblaster.app
-
-Preview a screen without hardware:
-    python3 -m rabbitblaster.app --screenshot /tmp/rb.png --screen buttons --remote sample
+    python3 -m rabbitblaster.app --screenshot /tmp/rb.png --screen brands --filter sony
 """
 
 from __future__ import annotations
@@ -15,8 +13,12 @@ import glob
 import os
 import time
 
-from . import flipperir, irsend, ui
+from . import flipperir, irdb, irsend, ui
 
+
+# --------------------------------------------------------------------------
+# Flipper .ir remote discovery
+# --------------------------------------------------------------------------
 
 def remote_dirs(extra=None):
     dirs = []
@@ -49,113 +51,202 @@ def collect_remotes(extra=None):
     return sorted(found.items())
 
 
+# --------------------------------------------------------------------------
+# Generic list page with optional type-to-filter
+# --------------------------------------------------------------------------
+
+class Page:
+    def __init__(self, title, items, on_select, subtitle="", enabled=None,
+                 filterable=False):
+        self.title = title
+        self.items = items
+        self.on_select = on_select          # idx(into self.items) -> action|None
+        self.base_subtitle = subtitle
+        self.enabled = enabled
+        self.filterable = filterable
+        self.sel = 0
+        self.filter = ""
+
+    def view(self):
+        if self.filterable and self.filter:
+            idx = [i for i, it in enumerate(self.items)
+                   if self.filter.lower() in it.lower()]
+        else:
+            idx = list(range(len(self.items)))
+        items = [self.items[i] for i in idx]
+        enabled = [self.enabled[i] for i in idx] if self.enabled else None
+        return items, enabled, idx
+
+    def subtitle(self):
+        if self.filterable and self.filter:
+            return "/" + self.filter
+        return self.base_subtitle
+
+
 class App:
     def __init__(self, fb, keypad, remotes, device=irsend.DEFAULT_DEVICE, repeats=2):
         self.fb = fb
         self.kp = keypad
-        self.remotes = remotes            # [(name, path)]
+        self.remotes = remotes
         self.device = device
         self.repeats = repeats
 
-    def _draw(self, img):
-        self.fb.show(img)
+    # -- page builders --
+    def home(self):
+        entries = []
+        if irdb.available():
+            n = len(irdb.list_brands())
+            entries.append(("IRDB  (%d brands)" % n, lambda: ("push", self.brands_page())))
+        for name, path in self.remotes:
+            entries.append((".ir  " + name,
+                            (lambda p: (lambda: ("push", self.buttons_page(os.path.splitext(os.path.basename(p))[0], p))))(path)))
+        labels = [e[0] for e in entries]
+        cbs = [e[1] for e in entries]
+        if not labels:
+            labels = ["(no IRDB and no .ir remotes found)"]
+            cbs = [lambda: None]
+        return Page("RABBIT BLASTER", labels, lambda i: cbs[i](),
+                    subtitle="%d sources" % len(entries))
 
+    def brands_page(self):
+        brands = irdb.list_brands()
+        return Page("IRDB brands", brands,
+                    lambda i: ("push", self.devices_page(brands[i])),
+                    subtitle="%d" % len(brands), filterable=True)
+
+    def devices_page(self, brand):
+        devs = irdb.list_devices(brand)
+        labels = [d[0] for d in devs]
+        return Page(brand[:20], labels,
+                    lambda i: ("push", self.functions_page(brand, devs[i][1])),
+                    subtitle="%d" % len(labels), filterable=len(labels) > 8)
+
+    def functions_page(self, brand, path):
+        rows = irdb.read_csv(path)
+        labels = [r.name for r in rows]
+        enabled = [irdb.supported(r.protocol) for r in rows]
+
+        def on_select(i):
+            res = irdb.render_row(rows[i])
+            if not res:
+                return None
+            c, d = res
+            return ("transmit", (c, d, rows[i].name))
+
+        return Page(brand[:20], labels, on_select, subtitle="%d keys" % len(labels),
+                    enabled=enabled, filterable=len(labels) > 8)
+
+    def buttons_page(self, name, path):
+        sigs = flipperir.parse(path)
+        labels = [s.name for s in sigs]
+        enabled = [s.transmittable() for s in sigs]
+
+        def on_select(i):
+            if not sigs[i].transmittable():
+                return None
+            c, d = sigs[i].render()
+            return ("transmit", (c, d, sigs[i].name))
+
+        return Page(name[:20], labels, on_select, subtitle="%d keys" % len(labels),
+                    enabled=enabled, filterable=len(labels) > 8)
+
+    # -- main loop --
     def run(self):
-        if not self.remotes:
-            self._draw(ui.message_screen("No remotes", "Drop .ir files in ~/.rabbit-blaster/remotes",
-                                         color=ui.ACCENT))
-            while self.kp.wait() not in ("QUIT", "BACK"):
-                pass
-            return
+        stack = [self.home()]
+        while stack:
+            page = stack[-1]
+            items, enabled, idx = page.view()
+            if page.sel >= len(items):
+                page.sel = max(0, len(items) - 1)
+            hint = ("type filter  OK pick  <-/ESC back" if page.filterable
+                    else "OK pick  <-/ESC back")
+            self.fb.show(ui.list_screen(page.title, items, page.sel,
+                                        subtitle=page.subtitle(), enabled=enabled,
+                                        hint=hint))
+            kind, val = self.kp.wait()
+            if kind == "nav":
+                if val == "UP" and items:
+                    page.sel = (page.sel - 1) % len(items)
+                elif val == "DOWN" and items:
+                    page.sel = (page.sel + 1) % len(items)
+                elif val == "LEFT":
+                    if len(stack) > 1:
+                        stack.pop()
+                elif val == "RIGHT":
+                    self._activate(page, items, idx, stack)
+            elif kind == "ok":
+                self._activate(page, items, idx, stack)
+            elif kind == "back":
+                stack.pop()
+            elif kind == "bksp":
+                if page.filterable and page.filter:
+                    page.filter = page.filter[:-1]
+                    page.sel = 0
+                else:
+                    stack.pop()
+            elif kind == "char" and page.filterable:
+                page.filter += val
+                page.sel = 0
 
-        sel = 0
-        while True:
-            names = [r[0] for r in self.remotes]
-            self._draw(ui.list_screen("RABBIT BLASTER", names, sel,
-                                      subtitle="%d remotes" % len(names),
-                                      hint="↑↓ pick   OK open   Q quit"))
-            btn = self.kp.wait()
-            if btn == "QUIT":
-                return
-            elif btn == "UP":
-                sel = (sel - 1) % len(names)
-            elif btn == "DOWN":
-                sel = (sel + 1) % len(names)
-            elif btn == "OK":
-                self._buttons_screen(self.remotes[sel][0], self.remotes[sel][1])
-
-    def _buttons_screen(self, name, path):
-        try:
-            signals = flipperir.parse(path)
-        except Exception as e:
-            self._flash("LOAD ERR", str(e), ui.ACCENT)
+    def _activate(self, page, items, idx, stack):
+        if not items:
             return
-        if not signals:
-            self._flash("Empty", "no signals in file", ui.ACCENT)
+        action = page.on_select(idx[page.sel])
+        if not action:
             return
-
-        labels = [s.name for s in signals]
-        enabled = [s.transmittable() for s in signals]
-        sel = 0
-        while True:
-            self._draw(ui.list_screen(name, labels, sel, subtitle="%d keys" % len(labels),
-                                      enabled=enabled))
-            btn = self.kp.wait()
-            if btn in ("BACK", "QUIT"):
-                return
-            elif btn == "UP":
-                sel = (sel - 1) % len(labels)
-            elif btn == "DOWN":
-                sel = (sel + 1) % len(labels)
-            elif btn == "OK":
-                self._transmit(signals[sel])
-
-    def _transmit(self, sig):
-        if not sig.transmittable():
-            self._flash("Unsupported", "%s not encodable yet" % (sig.protocol or sig.type), ui.ACCENT)
-            return
-        try:
-            irsend.send_signal(sig, device=self.device, repeats=self.repeats)
-            self._flash("SENT", sig.name, ui.ACCENT2)
-        except irsend.IRError as e:
-            self._flash("TX ERROR", str(e), ui.ACCENT)
+        if action[0] == "push":
+            stack.append(action[1])
+        elif action[0] == "transmit":
+            carrier, durs, label = action[1]
+            try:
+                irsend.send(carrier, durs, device=self.device, repeats=self.repeats)
+                self._flash("SENT", label, ui.ACCENT2)
+            except irsend.IRError as e:
+                self._flash("TX ERROR", str(e), ui.ACCENT)
 
     def _flash(self, big, sub, color):
-        self._draw(ui.message_screen(big, sub, color))
+        self.fb.show(ui.message_screen(big, sub, color))
         time.sleep(0.7)
 
 
+# --------------------------------------------------------------------------
+# Screenshot preview (no hardware)
+# --------------------------------------------------------------------------
+
 def _screenshot(args):
     remotes = collect_remotes(args.remotes)
-    if args.screen == "buttons":
-        path = dict(remotes).get(args.remote) or (remotes[0][1] if remotes else None)
-        if not path:
-            img = ui.message_screen("No remotes", "nothing to preview", ui.ACCENT)
-        else:
-            sigs = flipperir.parse(path)
-            img = ui.list_screen(args.remote or os.path.basename(path),
-                                 [s.name for s in sigs], args.select,
-                                 subtitle="%d keys" % len(sigs),
-                                 enabled=[s.transmittable() for s in sigs])
+    app = App(None, None, remotes)
+    if args.screen == "brands":
+        page = app.brands_page()
+    elif args.screen == "devices":
+        page = app.devices_page(args.brand or (irdb.list_brands() or ["?"])[0])
+    elif args.screen == "functions":
+        brand = args.brand or (irdb.list_brands() or ["?"])[0]
+        devs = irdb.list_devices(brand)
+        page = app.functions_page(brand, devs[0][1]) if devs else app.home()
     else:
-        names = [r[0] for r in remotes] or ["(none)"]
-        img = ui.list_screen("RABBIT BLASTER", names, args.select,
-                             subtitle="%d remotes" % len(remotes),
-                             hint="↑↓ pick   OK open   Q quit")
+        page = app.home()
+    if args.filter:
+        page.filter = args.filter
+    items, enabled, _ = page.view()
+    img = ui.list_screen(page.title, items, args.select, subtitle=page.subtitle(),
+                         enabled=enabled)
     img.save(args.screenshot)
-    print("wrote %s (%dx%d)" % (args.screenshot, img.width, img.height))
+    print("wrote %s (%dx%d), %d rows" % (args.screenshot, img.width, img.height, len(items)))
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="rabbitblaster.app")
     ap.add_argument("--fb", default="/dev/fb0")
     ap.add_argument("--keyboard", default=None)
-    ap.add_argument("--device", default=irsend.DEFAULT_DEVICE, help="LIRC TX device")
+    ap.add_argument("--device", default=irsend.DEFAULT_DEVICE)
     ap.add_argument("--repeats", type=int, default=2)
-    ap.add_argument("--remotes", default=None, help="extra remotes directory")
-    ap.add_argument("--screenshot", default=None, help="render a screen to PNG and exit")
-    ap.add_argument("--screen", choices=["remotes", "buttons"], default="remotes")
-    ap.add_argument("--remote", default=None, help="remote name for --screen buttons")
+    ap.add_argument("--remotes", default=None)
+    ap.add_argument("--screenshot", default=None)
+    ap.add_argument("--screen", choices=["home", "brands", "devices", "functions"],
+                    default="home")
+    ap.add_argument("--brand", default=None)
+    ap.add_argument("--filter", default="")
     ap.add_argument("--select", type=int, default=0)
     args = ap.parse_args(argv)
 
@@ -165,12 +256,11 @@ def main(argv=None):
 
     from .framebuffer import Framebuffer
     from .keypad import Keypad
-
-    remotes = collect_remotes(args.remotes)
     fb = Framebuffer(args.fb)
     kp = Keypad(args.keyboard)
     try:
-        App(fb, kp, remotes, device=args.device, repeats=args.repeats).run()
+        App(fb, kp, collect_remotes(args.remotes), device=args.device,
+            repeats=args.repeats).run()
     finally:
         kp.close()
         fb.close()
