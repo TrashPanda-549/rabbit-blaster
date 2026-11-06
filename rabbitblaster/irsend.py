@@ -11,6 +11,10 @@ import tempfile
 from typing import List
 
 DEFAULT_DEVICE = os.environ.get("RABBIT_BLASTER_TX", "/dev/lirc0")
+# 33% carrier duty (vs the driver's 50% default): standard for IR remotes and
+# cuts the 10-LED ring's current during marks, which the Zero's 5V rail
+# struggles to supply at 50%.
+DEFAULT_DUTY = int(os.environ.get("RABBIT_BLASTER_DUTY", "33"))
 _GAP = 40000
 
 
@@ -33,7 +37,7 @@ def _build_file(carrier: int, durations: List[int], repeats: int) -> str:
 
 
 def send(carrier: int, durations: List[int], device: str = DEFAULT_DEVICE,
-         repeats: int = 1) -> None:
+         repeats: int = 1, duty: int = DEFAULT_DUTY) -> None:
     if not durations:
         raise IRError("no durations to send")
     if shutil.which("ir-ctl") is None:
@@ -45,7 +49,8 @@ def send(carrier: int, durations: List[int], device: str = DEFAULT_DEVICE,
     try:
         with os.fdopen(fd, "w") as f:
             f.write(text)
-        proc = subprocess.run(["ir-ctl", "-d", device, "--send=" + path],
+        proc = subprocess.run(["ir-ctl", "-d", device, "--duty-cycle=%d" % duty,
+                               "--send=" + path],
                               capture_output=True, text=True)
         if proc.returncode != 0:
             raise IRError("ir-ctl failed (%d): %s"

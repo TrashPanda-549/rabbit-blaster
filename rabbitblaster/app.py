@@ -87,6 +87,7 @@ class App:
     # The COBRA Commander's 10-LED driver latches on if sends are fired
     # back-to-back; enforce a cooldown so the ring is never held on.
     MIN_SEND_GAP = 1.5
+    SETTLE_S = 0.3   # power-on -> send delay so inrush and LED burst don't coincide
 
     def __init__(self, fb, keypad, remotes, device=irsend.DEFAULT_DEVICE, repeats=1):
         self.fb = fb
@@ -212,6 +213,9 @@ class App:
                 if not power.enable():
                     raise irsend.IRError("board power refused by interlock")
                 try:
+                    # Let the 5V rail / board caps charge before the LED burst;
+                    # inrush + burst together sag the supply and reset the Pi.
+                    time.sleep(self.SETTLE_S)
                     irsend.send(carrier, durs, device=self.device, repeats=self.repeats)
                 finally:
                     power.disable()
