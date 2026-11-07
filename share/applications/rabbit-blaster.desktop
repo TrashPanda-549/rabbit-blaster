@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Rabbit Blaster
-Comment=IR blaster - transmit Flipper .ir codes via the GPIO12 IR LED
+Comment=IR blaster - transmit IR codes via the external COBRA Commander (GPIO14)
 Exec=/usr/share/APPLaunch/bin/rabbit-blaster
 Icon=share/images/rabbit-blaster.png
 Terminal=false
