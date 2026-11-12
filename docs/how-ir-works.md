@@ -153,6 +153,37 @@ remove any `gpio-ir` RX pull-up from the *same* pad, send a known NEC code at
 38 kHz/33 % with 5 V steady, and confirm on the **front/selfie camera** (rear
 cameras have an IR filter) that the ring flickers, plus that the TV responds.
 
+## 7. Bring-up checklist — make the Zero drive it exactly like the ADV
+
+The app code is already in the ADV model (steady 5 V, modulated line, no
+power-PWM): `power.py` enables 5 V + GPIO26 and refuses unless `gpio-ir-tx` is
+active-high (idle low); `irsend.py` auto-finds the send-capable `/dev/lircN` and
+sends 38 kHz/33 %. The only thing left is the device-side pin. Steps (need the
+Zero in hand):
+
+1. **Read the pad→BCM map** (no board power): `gpioinfo | grep -vi unnamed` and
+   `pinctrl` — find which BCM line is wired to the **G3** transmit pad (and
+   **G15** receive). M5 may have named the lines ("G3"/"G15"); otherwise match by
+   the `cardputerzero` overlay.
+2. **Edit `/boot/firmware/config.txt`** (back it up first):
+   - `enable_uart=0` (already set — keeps the UART off the TX pad)
+   - `dtoverlay=gpio-ir-tx,gpio_pin=<G3-BCM>`  ← TX, active-high
+   - `dtoverlay=gpio-ir,gpio_pin=<G15-BCM>,gpio_pull=up`  ← RX (optional)
+   - Make sure `<G3-BCM>` isn't also claimed by I²C/SPI or the cardputerzero
+     overlay (BCM2/3 are the I²C bus the keyboard uses — avoid).
+3. **Reboot.**
+4. **Pin the interlock:** set `RB_IR_TX_GPIO=<G3-BCM>` in the launcher
+   (`/usr/share/APPLaunch/bin/rabbit-blaster`) so `power.enable()` only powers up
+   when gpio-ir-tx is on that exact pad.
+5. **Sanity-check:** `ir-ctl -d /dev/lircN --features` shows "can send" on the TX
+   node; `python3 -c "from rabbitblaster import power; print(power.ir_tx_safe())"`
+   prints `True`.
+6. **Blast test:** seat the board, run the app, send a known TV power code. Watch
+   the ring on a **front/selfie camera** (rear cams filter IR) — brief flicker,
+   board cool, TV reacts. If it flickers but the TV ignores it, it's a
+   code/brand issue (try another code); if the ring goes solid or hot, the TX
+   pad/BCM is still wrong — recheck step 1.
+
 ---
 
 ### Sources

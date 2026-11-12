@@ -1,16 +1,48 @@
-"""Transmit IR via ir-ctl on a LIRC character device (default /dev/lirc0,
-the GPIO12 gpio-ir-tx transmitter on the Cardputer Zero).
+"""Transmit IR via ir-ctl on a LIRC character device.
+
+The transmitter is the gpio-ir-tx node feeding the external COBRA Commander.
+Its /dev/lircN number can change when the TX pin is reassigned, so we
+auto-detect the send-capable device at run time (overridable with
+RABBIT_BLASTER_TX). Carrier is 38 kHz at 33 % duty, matching the ADV.
 """
 
 from __future__ import annotations
 
+import glob
 import os
 import shutil
 import subprocess
 import tempfile
-from typing import List
+from typing import List, Optional
 
-DEFAULT_DEVICE = os.environ.get("RABBIT_BLASTER_TX", "/dev/lirc0")
+_tx_device_cache: Optional[str] = None
+
+
+def _device_can_send(dev: str) -> bool:
+    try:
+        out = subprocess.run(["ir-ctl", "-d", dev, "--features"],
+                             capture_output=True, text=True, timeout=5)
+        return "can send" in (out.stdout + out.stderr).lower()
+    except Exception:
+        return False
+
+
+def find_tx_device() -> str:
+    """The LIRC char device that can transmit. Honors RABBIT_BLASTER_TX, else
+    probes /dev/lirc* for send capability, else falls back to /dev/lirc0."""
+    global _tx_device_cache
+    env = os.environ.get("RABBIT_BLASTER_TX")
+    if env:
+        return env
+    if _tx_device_cache:
+        return _tx_device_cache
+    for dev in sorted(glob.glob("/dev/lirc*")):
+        if _device_can_send(dev):
+            _tx_device_cache = dev
+            return dev
+    return "/dev/lirc0"
+
+
 # 33% carrier duty (vs the driver's 50% default): standard for IR remotes and
 # cuts the 10-LED ring's current during marks, which the Zero's 5V rail
 # struggles to supply at 50%.
@@ -36,12 +68,14 @@ def _build_file(carrier: int, durations: List[int], repeats: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def send(carrier: int, durations: List[int], device: str = DEFAULT_DEVICE,
+def send(carrier: int, durations: List[int], device: Optional[str] = None,
          repeats: int = 1, duty: int = DEFAULT_DUTY) -> None:
     if not durations:
         raise IRError("no durations to send")
     if shutil.which("ir-ctl") is None:
         raise IRError("ir-ctl not found on PATH")
+    if device is None:
+        device = find_tx_device()
 
     text = _build_file(carrier, durations, repeats)
     fd, path = tempfile.mkstemp(suffix=".ir-ctl", prefix="rb_", dir="/dev/shm"
@@ -62,6 +96,6 @@ def send(carrier: int, durations: List[int], device: str = DEFAULT_DEVICE,
             pass
 
 
-def send_signal(signal, device: str = DEFAULT_DEVICE, repeats: int = 1) -> None:
+def send_signal(signal, device: Optional[str] = None, repeats: int = 1) -> None:
     carrier, durations = signal.render()
     send(carrier, durations, device=device, repeats=repeats)
