@@ -1,4 +1,5 @@
-"""Cardputer Zero keyboard (tca8418c) -> UI events via evdev.
+"""Cardputer Zero keyboard (tca8418c) -> UI events, read straight from the
+kernel input device (no python-evdev: importing it cost 0.45 s on the Zero).
 
 wait() returns a (kind, value) tuple:
     ("nav", "UP"|"DOWN"|"LEFT"|"RIGHT")   arrow keys (auto-repeat)
@@ -11,84 +12,75 @@ wait() returns a (kind, value) tuple:
 from __future__ import annotations
 
 import glob
+import os
+import struct
 
-from evdev import InputDevice, ecodes
+# struct input_event: timeval (two native longs), type, code, value.
+_EVENT = struct.Struct("llHHi")
+_EV_KEY = 1
 
-_NAV = {
-    ecodes.KEY_UP: "UP",
-    ecodes.KEY_DOWN: "DOWN",
-    ecodes.KEY_LEFT: "LEFT",
-    ecodes.KEY_RIGHT: "RIGHT",
-}
+# Key codes from linux/input-event-codes.h.
+_ESC, _BACKSPACE, _TAB, _ENTER, _KPENTER = 1, 14, 15, 28, 96
+_SHIFTS = (42, 54)
+_NAV = {103: "UP", 108: "DOWN", 105: "LEFT", 106: "RIGHT"}
+_CHARS = {12: "-", 52: ".", 57: " "}
+for _first, _row in ((2, "1234567890"), (16, "qwertyuiop"),
+                     (30, "asdfghjkl"), (44, "zxcvbnm")):
+    for _i, _ch in enumerate(_row):
+        _CHARS[_first + _i] = _ch
 
-_CHARS = {}
-for _ch in "abcdefghijklmnopqrstuvwxyz":
-    _code = getattr(ecodes, "KEY_" + _ch.upper(), None)
-    if _code is not None:
-        _CHARS[_code] = _ch
-for _d in "0123456789":
-    _code = getattr(ecodes, "KEY_" + _d, None)
-    if _code is not None:
-        _CHARS[_code] = _d
-_CHARS[ecodes.KEY_SPACE] = " "
-_CHARS[ecodes.KEY_MINUS] = "-"
-_CHARS[ecodes.KEY_DOT] = "."
-
-_DEFAULT_PATHS = ["/dev/input/cardputer-zero-internal"]
+_DEFAULT_PATH = "/dev/input/cardputer-zero-internal"
 
 
 def find_keyboard() -> str:
-    for p in _DEFAULT_PATHS:
+    if os.path.exists(_DEFAULT_PATH):
+        return _DEFAULT_PATH
+    for name_file in sorted(glob.glob("/sys/class/input/event*/device/name")):
         try:
-            InputDevice(p)
-            return p
-        except Exception:
-            pass
-    for p in sorted(glob.glob("/dev/input/event*")):
-        try:
-            if "tca8418" in (InputDevice(p).name or "").lower():
-                return p
-        except Exception:
+            with open(name_file) as f:
+                if "tca8418" in f.read().lower():
+                    return "/dev/input/" + name_file.split("/")[4]
+        except OSError:
             continue
     raise RuntimeError("Cardputer keyboard not found under /dev/input")
 
 
 class Keypad:
     def __init__(self, path: str | None = None):
-        self.dev = InputDevice(path or find_keyboard())
+        self.fd = os.open(path or find_keyboard(), os.O_RDONLY)
         self._shift = False
 
     def wait(self):
         # On this keyboard the arrows are an Fn layer we can't see as KEY_UP,
         # so base-layer Tab / Shift+Tab drive up/down with no Fn needed.
-        for event in self.dev.read_loop():
-            if event.type != ecodes.EV_KEY:
+        while True:
+            data = os.read(self.fd, _EVENT.size)    # the kernel returns whole events
+            if len(data) < _EVENT.size:
                 continue
-            code, val = event.code, event.value
-            if code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
+            _sec, _usec, etype, code, val = _EVENT.unpack(data)
+            if etype != _EV_KEY:
+                continue
+            if code in _SHIFTS:
                 self._shift = val != 0
-                continue
-            if code in _NAV:
-                if val in (1, 2):           # press or auto-repeat
+            elif code in _NAV:
+                if val:                             # press or auto-repeat
                     return ("nav", _NAV[code])
-                continue
-            if code == ecodes.KEY_TAB:
-                if val in (1, 2):
+            elif code == _TAB:
+                if val:
                     return ("nav", "UP" if self._shift else "DOWN")
+            elif val != 1:                          # the rest fire on press only
                 continue
-            if val != 1:                    # the rest fire on press only
-                continue
-            if code in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER):
+            elif code in (_ENTER, _KPENTER):
                 return ("ok", None)
-            if code == ecodes.KEY_ESC:
+            elif code == _ESC:
                 return ("back", None)
-            if code == ecodes.KEY_BACKSPACE:
+            elif code == _BACKSPACE:
                 return ("bksp", None)
-            if code in _CHARS:
+            elif code in _CHARS:
                 return ("char", _CHARS[code])
 
     def close(self):
         try:
-            self.dev.close()
-        except Exception:
+            os.close(self.fd)
+        except OSError:
             pass

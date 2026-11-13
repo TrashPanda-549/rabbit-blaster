@@ -36,7 +36,6 @@ def main(argv=None):
             print("%s %-20s %s" % (flag, s.name, extra))
         if not args.name:
             print("\n(use --name NAME to transmit; '!' = unsupported, carry as raw)")
-            return 0
         return 0
 
     matches = [s for s in signals if s.name == args.name]

@@ -15,10 +15,6 @@ protocol names come from. Anything else is carried as a `raw` Flipper entry
 
 from __future__ import annotations
 
-# Inter-frame gap (us) inserted between repeated frames.
-_GAP = 40000
-
-
 def _finish(durs):
     """Ensure the sequence ends on a pulse (odd length)."""
     if len(durs) % 2 == 0:
@@ -51,140 +47,14 @@ def _segments_to_durations(segs):
     return [d for _, d in merged]
 
 
-# --------------------------------------------------------------------------
-# Pulse-distance protocols (NEC family, Samsung)
-# --------------------------------------------------------------------------
+def _manchester(segs, bits, mark_first):
+    """Append bi-phase bits to segs. bits: [(bit, half_width_us)]; a 1 is
+    mark-then-space when mark_first (RC6), space-then-mark otherwise (RC5)."""
+    for b, half in bits:
+        first = 1 if bool(b) == mark_first else 0
+        segs += [(first, half), (1 - first, half)]
+    return _segments_to_durations(segs)
 
-def _pulse_distance(header, bits, one, zero, mark, trailer_mark=True):
-    durs = list(header)
-    for b in bits:
-        durs.append(mark)
-        durs.append(one if b else zero)
-    if trailer_mark:
-        durs.append(mark)
-    return durs
-
-
-def nec(address, command):
-    bits = (_lsb_bits(address & 0xFF) + _lsb_bits((~address) & 0xFF)
-            + _lsb_bits(command & 0xFF) + _lsb_bits((~command) & 0xFF))
-    durs = _pulse_distance([9000, 4500], bits, 1690, 560, 560)
-    return 38000, _finish(durs)
-
-
-def necext(address, command):
-    # 16-bit address (not complemented) + command + ~command
-    bits = (_lsb_bits(address & 0xFF) + _lsb_bits((address >> 8) & 0xFF)
-            + _lsb_bits(command & 0xFF) + _lsb_bits((~command) & 0xFF))
-    durs = _pulse_distance([9000, 4500], bits, 1690, 560, 560)
-    return 38000, _finish(durs)
-
-
-def samsung32(address, command):
-    bits = (_lsb_bits(address & 0xFF) + _lsb_bits(address & 0xFF)
-            + _lsb_bits(command & 0xFF) + _lsb_bits((~command) & 0xFF))
-    durs = _pulse_distance([4500, 4500], bits, 1690, 560, 560)
-    return 38000, _finish(durs)
-
-
-def build_nec(device, subdevice, function):
-    """NEC with explicit device/subdevice/function (irdb semantics).
-    subdevice < 0 means 'not given' -> use ~device as the second byte."""
-    s = subdevice if (subdevice is not None and subdevice >= 0) else (~device) & 0xFF
-    bits = (_lsb_bits(device & 0xFF) + _lsb_bits(s & 0xFF)
-            + _lsb_bits(function & 0xFF) + _lsb_bits((~function) & 0xFF))
-    durs = _pulse_distance([9000, 4500], bits, 1690, 560, 560)
-    return 38000, _finish(durs)
-
-
-def jvc(device, function):
-    bits = _lsb_bits(device & 0xFF) + _lsb_bits(function & 0xFF)
-    durs = _pulse_distance([8400, 4200], bits, 1578, 526, 526)
-    return 38000, _finish(durs)
-
-
-# --------------------------------------------------------------------------
-# Sony SIRC (pulse-width coded, 40 kHz, send 3 frames)
-# --------------------------------------------------------------------------
-
-def sirc(address, command, nbits=12, frames=3):
-    if nbits == 12:
-        cmd_n, addr_n = 7, 5
-    elif nbits == 15:
-        cmd_n, addr_n = 7, 8
-    elif nbits == 20:
-        cmd_n, addr_n = 7, 13  # 5 addr + 8 extended, packed together LSB-first
-    else:
-        raise ValueError("SIRC nbits must be 12/15/20")
-
-    bits = _lsb_bits(command, cmd_n) + _lsb_bits(address, addr_n)
-
-    one_frame = [2400, 600]  # header mark, space
-    for b in bits:
-        one_frame.append(1200 if b else 600)
-        one_frame.append(600)
-    # one_frame currently ends with a space; frames start every 45 ms.
-    used = sum(one_frame)
-    gap = max(45000 - used, 5000)
-
-    durs = []
-    for i in range(frames):
-        durs.extend(one_frame)
-        if i != frames - 1:
-            # extend the trailing space to make up the 45 ms period
-            durs[-1] += gap
-    return 40000, _finish(durs)
-
-
-# --------------------------------------------------------------------------
-# Manchester protocols (RC5 / RC6)
-# --------------------------------------------------------------------------
-
-def rc5(address, command):
-    """Standard 14-bit RC5. field bit = 1 for commands 0..63."""
-    half = 889
-    toggle = 0
-    field = 1 if command < 64 else 0
-    cmd6 = command & 0x3F
-    frame = [1, field, toggle] + _msb_bits(address & 0x1F, 5) + _msb_bits(cmd6, 6)
-    segs = []
-    for b in frame:
-        # IEEE Manchester: 1 = space then mark, 0 = mark then space
-        if b:
-            segs.append((0, half)); segs.append((1, half))
-        else:
-            segs.append((1, half)); segs.append((0, half))
-    return 36000, _finish(_segments_to_durations(segs))
-
-
-def rc6(address, command):
-    """RC6 mode 0 (customer/command), 36 kHz. Toggle bit is double width."""
-    u = 444
-    segs = [(1, 6 * u), (0, 2 * u)]  # leader
-    # start bit = 1, then 3 mode bits = 000
-    frame = [1, 0, 0, 0]
-    widths = [1, 1, 1, 1]
-    # toggle bit (double width)
-    frame.append(0)
-    widths.append(2)
-    # 8-bit address + 8-bit command, MSB first, normal width
-    for b in _msb_bits(address & 0xFF, 8) + _msb_bits(command & 0xFF, 8):
-        frame.append(b)
-        widths.append(1)
-    for b, w in zip(frame, widths):
-        half = u * w
-        # RC6 Manchester: 1 = mark then space, 0 = space then mark
-        if b:
-            segs.append((1, half)); segs.append((0, half))
-        else:
-            segs.append((0, half)); segs.append((1, half))
-    return 36000, _finish(_segments_to_durations(segs))
-
-
-# --------------------------------------------------------------------------
-# irdb long tail. Each function takes irdb's (device, subdevice, function)
-# numbers and returns one complete key press; subdevice < 0 means "not given".
-# --------------------------------------------------------------------------
 
 def _field_bits(fields, msb=False):
     """Flatten [(value, nbits), ...] into a bit list, LSB-first unless msb."""
@@ -224,6 +94,96 @@ def _sub(device, subdevice):
     """NEC-style default: missing subdevice is the complement of the device."""
     return subdevice if subdevice is not None and subdevice >= 0 else (~device) & 0xFF
 
+
+# --------------------------------------------------------------------------
+# Pulse-distance protocols (NEC family, Samsung, JVC)
+# --------------------------------------------------------------------------
+
+def _nec_frame(byte0, byte1, command, lead=(9000, 4500)):
+    """Two address bytes, command, ~command; 560 us marks, 38 kHz."""
+    f = [(byte0, 8), (byte1, 8), (command, 8), (~command, 8)]
+    return 38000, _finish(_pd(1, lead, f, zero=(560, 560), one=(560, 1690), tail=560))
+
+
+def nec(address, command):
+    return _nec_frame(address, ~address, command)
+
+
+def necext(address, command):
+    # 16-bit address (not complemented) + command + ~command
+    return _nec_frame(address, address >> 8, command)
+
+
+def samsung32(address, command):
+    return _nec_frame(address, address, command, lead=(4500, 4500))
+
+
+def build_nec(device, subdevice, function):
+    """NEC with explicit device/subdevice/function (irdb semantics)."""
+    return _nec_frame(device, _sub(device, subdevice), function)
+
+
+def jvc(device, function):
+    f = [(device, 8), (function, 8)]
+    return 38000, _finish(_pd(1, (8400, 4200), f, zero=(526, 526), one=(526, 1578), tail=526))
+
+
+# --------------------------------------------------------------------------
+# Sony SIRC (pulse-width coded, 40 kHz, send 3 frames)
+# --------------------------------------------------------------------------
+
+def sirc(address, command, nbits=12, frames=3):
+    if nbits not in (12, 15, 20):
+        raise ValueError("SIRC nbits must be 12/15/20")
+    # 7 command bits, then the address (20-bit: 5 addr + 8 extended), LSB-first
+    bits = _lsb_bits(command, 7) + _lsb_bits(address, nbits - 7)
+
+    one_frame = [2400, 600]  # header mark, space
+    for b in bits:
+        one_frame.append(1200 if b else 600)
+        one_frame.append(600)
+    # one_frame currently ends with a space; frames start every 45 ms.
+    used = sum(one_frame)
+    gap = max(45000 - used, 5000)
+
+    durs = []
+    for i in range(frames):
+        durs.extend(one_frame)
+        if i != frames - 1:
+            # extend the trailing space to make up the 45 ms period
+            durs[-1] += gap
+    return 40000, _finish(durs)
+
+
+# --------------------------------------------------------------------------
+# Manchester protocols (RC5 / RC6)
+# --------------------------------------------------------------------------
+
+def rc5(address, command):
+    """Standard 14-bit RC5. field bit = 1 for commands 0..63."""
+    field = 1 if command < 64 else 0
+    bits = [1, field, 0] + _field_bits([(address, 5), (command, 6)], msb=True)
+    return 36000, _finish(_manchester([], [(b, 889) for b in bits], False))
+
+
+def _rc6_frame(mode, payload_bits):
+    """RC6 Manchester frame: leader, start bit, 3 mode bits, double-width
+    toggle (sent as 0), then the payload MSB-first. 1 = mark then space."""
+    u = 444
+    bits = [(1, u)] + [(b, u) for b in _msb_bits(mode, 3)] + [(0, 2 * u)]
+    bits += [(b, u) for b in payload_bits]
+    return 36000, _finish(_manchester([(1, 6 * u), (0, 2 * u)], bits, True))
+
+
+def rc6(address, command):
+    """RC6 mode 0 (customer/command), 36 kHz."""
+    return _rc6_frame(0, _field_bits([(address, 8), (command, 8)], msb=True))
+
+
+# --------------------------------------------------------------------------
+# irdb long tail. Each function takes irdb's (device, subdevice, function)
+# numbers and returns one complete key press; subdevice < 0 means "not given".
+# --------------------------------------------------------------------------
 
 def necx(device, subdevice, function):
     """NECx1 / NECx2: NEC data behind a 4.5 ms / 4.5 ms header."""
@@ -399,21 +359,6 @@ def directv(device, function):
     return 38000, _finish(durs)
 
 
-def _rc6_frame(mode, payload_bits):
-    """RC6 Manchester frame: leader, start bit, 3 mode bits, double-width
-    toggle (sent as 0), then the payload MSB-first. 1 = mark then space."""
-    u = 444
-    segs = [(1, 6 * u), (0, 2 * u)]
-    frame = [(1, 1)] + [(b, 1) for b in _msb_bits(mode, 3)] + [(0, 2)]
-    frame += [(b, 1) for b in payload_bits]
-    for b, w in frame:
-        if b:
-            segs.append((1, u * w)); segs.append((0, u * w))
-        else:
-            segs.append((0, u * w)); segs.append((1, u * w))
-    return 36000, _finish(_segments_to_durations(segs))
-
-
 def mce(device, subdevice, function):
     """MCE (RC6 mode 6, 32 bits): OEM1 = 128, OEM2 = subdevice, toggle 0."""
     payload = _field_bits([(128, 8), (max(subdevice, 0), 8), (0, 1),
@@ -438,8 +383,6 @@ _PROTOCOLS = {
     "RC5X": lambda a, c: rc5(a[0], c[0]),
     "RC6": lambda a, c: rc6(a[0], c[0]),
 }
-
-SUPPORTED = sorted(_PROTOCOLS)
 
 
 def encode(protocol, address_bytes, command_bytes):

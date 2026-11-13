@@ -112,8 +112,3 @@ def send(carrier: int, durations: List[int], device: Optional[str] = None,
             os.unlink(path)
         except OSError:
             pass
-
-
-def send_signal(signal, device: Optional[str] = None, repeats: int = 1) -> None:
-    carrier, durations = signal.render()
-    send(carrier, durations, device=device, repeats=repeats)

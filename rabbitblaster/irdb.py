@@ -11,6 +11,7 @@ reported as unsupported (shown with a mark, not transmitted).
 from __future__ import annotations
 
 import csv
+import functools
 import os
 from collections import namedtuple
 
@@ -32,6 +33,11 @@ def _sony20(d, s, f):
     return ip.sirc((d & 0x1F) | (((s & 0xFF) << 5) if s >= 0 else 0), f, 20)
 
 
+def _df(fn, *args, **kw):
+    """Adapt an encoder that takes (device, function) and ignores subdevice."""
+    return lambda d, s, f: fn(d, f, *args, **kw)
+
+
 # irdb protocol name (lower-case) -> encoder(device, subdevice, function).
 _ENCODERS = {
     "nec": ip.build_nec, "nec1": ip.build_nec, "nec2": ip.build_nec,
@@ -43,42 +49,40 @@ _ENCODERS = {
     "tivo unit=0": lambda d, s, f: ip.tivo(f, 0),
     "tivo unit=1": lambda d, s, f: ip.tivo(f, 1),
     "aiwa": ip.aiwa,
-    "dgtec": lambda d, s, f: ip.dgtec(d, f),
-    "proton": lambda d, s, f: ip.proton(d, f),
+    "dgtec": _df(ip.dgtec),
+    "proton": _df(ip.proton),
     "panasonic": ip.panasonic,
     "jvc-48": ip.jvc48,
     "denon-k": ip.denon_k,
     "fujitsu": ip.fujitsu,
-    "denon": lambda d, s, f: ip.denon(d, f),
-    "denon{1}": lambda d, s, f: ip.denon(d, f),
-    "sharp": lambda d, s, f: ip.sharp(d, f),
-    "sharp{1}": lambda d, s, f: ip.sharp(d, f),
-    "mitsubishi": lambda d, s, f: ip.mitsubishi(d, f),
-    "akai": lambda d, s, f: ip.akai(d, f),
-    "thomson": lambda d, s, f: ip.thomson(d, f),
-    "recs80": lambda d, s, f: ip.recs80(d, f),
-    "velleman": lambda d, s, f: ip.velleman(d, f),
-    "panasonic_old": lambda d, s, f: ip.panasonic_old(d, f),
-    "emerson": lambda d, s, f: ip.emerson(d, f),
-    "scatl-6": lambda d, s, f: ip.scatl6(d, f),
-    "rca": lambda d, s, f: ip.rca(d, f),
-    "rca-38": lambda d, s, f: ip.rca(d, f, carrier=38700),
-    "rca(old)": lambda d, s, f: ip.rca(d, f, old=True),
-    "rca-38(old)": lambda d, s, f: ip.rca(d, f, carrier=38700, old=True),
-    "g.i.cable": lambda d, s, f: ip.gi_cable(d, f),
+    "denon": _df(ip.denon), "denon{1}": _df(ip.denon),
+    "sharp": _df(ip.sharp), "sharp{1}": _df(ip.sharp),
+    "mitsubishi": _df(ip.mitsubishi),
+    "akai": _df(ip.akai),
+    "thomson": _df(ip.thomson),
+    "recs80": _df(ip.recs80),
+    "velleman": _df(ip.velleman),
+    "panasonic_old": _df(ip.panasonic_old),
+    "emerson": _df(ip.emerson),
+    "scatl-6": _df(ip.scatl6),
+    "rca": _df(ip.rca),
+    "rca-38": _df(ip.rca, carrier=38700),
+    "rca(old)": _df(ip.rca, old=True),
+    "rca-38(old)": _df(ip.rca, carrier=38700, old=True),
+    "g.i.cable": _df(ip.gi_cable),
     "dish_network": ip.dish_network,
-    "directv": lambda d, s, f: ip.directv(d, f),
+    "directv": _df(ip.directv),
     "mce": ip.mce,
-    "rc5": lambda d, s, f: ip.rc5(d, f),
-    "rc6": lambda d, s, f: ip.rc6(d, f),
-    "sony12": lambda d, s, f: ip.sirc(d, f, 12),
-    "sony15": lambda d, s, f: ip.sirc(d, f, 15),
+    "rc5": _df(ip.rc5),
+    "rc6": _df(ip.rc6),
+    "sony12": _df(ip.sirc, 12),
+    "sony15": _df(ip.sirc, 15),
     "sony20": _sony20,
-    "jvc": lambda d, s, f: ip.jvc(d, f),
-    "jvc{2}": lambda d, s, f: ip.jvc(d, f),
+    "jvc": _df(ip.jvc), "jvc{2}": _df(ip.jvc),
 }
 
 
+@functools.lru_cache(maxsize=None)
 def base_dir():
     for d in BASE_CANDIDATES:
         if d and os.path.isdir(d):
@@ -110,12 +114,18 @@ def render_row(row: Row):
 # Tree navigation
 # --------------------------------------------------------------------------
 
-def list_brands():
+@functools.lru_cache(maxsize=None)
+def _brands():
     base = base_dir()
     if not base:
-        return []
-    return sorted((n for n in os.listdir(base)
-                   if os.path.isdir(os.path.join(base, n))), key=str.lower)
+        return ()
+    with os.scandir(base) as it:
+        return tuple(sorted((e.name for e in it if e.is_dir()), key=str.lower))
+
+
+def list_brands():
+    """Brand folder names, sorted. Scanned once per run (646 folders)."""
+    return list(_brands())
 
 
 def list_devices(brand):

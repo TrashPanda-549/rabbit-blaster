@@ -9,6 +9,7 @@ the irdb database (648 brands) and Flipper .ir remotes, and transmit on
 from __future__ import annotations
 
 import argparse
+import functools
 import glob
 import os
 import time
@@ -99,19 +100,19 @@ class App:
 
     # -- page builders --
     def home(self):
+        # (label, builder of the page that Enter opens)
         entries = []
         if irdb.available():
-            n = len(irdb.list_brands())
-            entries.append(("IRDB  (%d brands)" % n, lambda: ("push", self.brands_page())))
+            entries.append(("IRDB  (%d brands)" % len(irdb.list_brands()),
+                            self.brands_page))
         for name, path in self.remotes:
             entries.append((".ir  " + name,
-                            (lambda p: (lambda: ("push", self.buttons_page(os.path.splitext(os.path.basename(p))[0], p))))(path)))
-        labels = [e[0] for e in entries]
-        cbs = [e[1] for e in entries]
-        if not labels:
-            labels = ["(no IRDB and no .ir remotes found)"]
-            cbs = [lambda: None]
-        return Page("RABBIT BLASTER", labels, lambda i: cbs[i](),
+                            functools.partial(self.buttons_page, name, path)))
+        if not entries:
+            return Page("RABBIT BLASTER", ["(no IRDB and no .ir remotes found)"],
+                        lambda i: None, subtitle="0 sources")
+        return Page("RABBIT BLASTER", [e[0] for e in entries],
+                    lambda i: ("push", entries[i][1]()),
                     subtitle="%d sources" % len(entries))
 
     def brands_page(self):

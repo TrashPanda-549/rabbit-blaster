@@ -52,7 +52,7 @@ fi
 
 # --- packages -------------------------------------------------------------------
 need=""
-for pkg in v4l-utils python3-pil python3-numpy python3-evdev git curl; do
+for pkg in v4l-utils python3-pil git curl; do
   dpkg -s "$pkg" >/dev/null 2>&1 || need="$need $pkg"
 done
 if [ -n "$need" ]; then

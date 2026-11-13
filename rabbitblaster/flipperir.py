@@ -21,7 +21,7 @@ A Flipper .ir file is a header followed by signal blocks separated by `#`:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 from . import irproto
 
@@ -34,7 +34,6 @@ class Signal:
     address: List[int] = field(default_factory=list)
     command: List[int] = field(default_factory=list)
     frequency: int = 38000
-    duty_cycle: float = 0.33
     data: List[int] = field(default_factory=list)
 
     def transmittable(self) -> bool:
@@ -67,21 +66,12 @@ class Signal:
         return irproto.encode(self.protocol, self.address, self.command)
 
 
-def _hexbytes(s: str) -> List[int]:
+def _ints(s: str, base: int = 10) -> List[int]:
+    """Whitespace-separated integers, skipping anything unparseable."""
     out = []
     for tok in s.split():
         try:
-            out.append(int(tok, 16))
-        except ValueError:
-            pass
-    return out
-
-
-def _ints(s: str) -> List[int]:
-    out = []
-    for tok in s.split():
-        try:
-            out.append(int(tok))
+            out.append(int(tok, base))
         except ValueError:
             pass
     return out
@@ -89,41 +79,32 @@ def _ints(s: str) -> List[int]:
 
 def parse(path) -> List[Signal]:
     signals: List[Signal] = []
-    cur: Optional[dict] = None
+    cur: dict = {}
 
     def flush():
-        nonlocal cur
-        if cur and cur.get("name"):
+        if cur.get("name"):
             signals.append(Signal(
-                name=cur.get("name", "?"),
+                name=cur["name"],
                 type=cur.get("type", "parsed"),
                 protocol=cur.get("protocol", ""),
-                address=_hexbytes(cur.get("address", "")),
-                command=_hexbytes(cur.get("command", "")),
-                frequency=int(cur.get("frequency", "38000") or 38000),
-                duty_cycle=float(cur.get("duty_cycle", "0.33") or 0.33),
+                address=_ints(cur.get("address", ""), 16),
+                command=_ints(cur.get("command", ""), 16),
+                frequency=int(cur.get("frequency") or 38000),
                 data=_ints(cur.get("data", "")),
             ))
-        cur = None
+        cur.clear()
 
     with open(path, "r", errors="replace") as f:
         for line in f:
-            line = line.rstrip("\n")
             if line.startswith("#"):
                 flush()
                 continue
-            if ":" not in line:
-                continue
-            key, _, val = line.partition(":")
+            key, sep, val = line.partition(":")
             key = key.strip().lower()
-            val = val.strip()
-            if key in ("filetype", "version"):
+            if not sep or key in ("filetype", "version"):
                 continue
             if key == "name":
                 flush()
-                cur = {}
-            if cur is None:
-                cur = {}
-            cur[key] = val
+            cur[key] = val.strip()
     flush()
     return signals
