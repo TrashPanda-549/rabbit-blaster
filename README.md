@@ -18,7 +18,7 @@ code.
 
 On the Cardputer Zero (over SSH or its terminal):
 
-    git clone https://github.com/OWNER/rabbit-blaster.git
+    git clone https://github.com/TrashPanda-549/rabbit-blaster.git
     cd rabbit-blaster
     ./install.sh
     sudo reboot
