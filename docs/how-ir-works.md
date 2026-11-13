@@ -152,10 +152,10 @@ ADV header's documented pad roles, and the pins M5's own Zero cap drivers use
 
 Header power, per the same drivers: `ext_usb_gpio_fun=0` and `ext_5v_out=1`.
 
-So on the Zero: **IR TX = GPIO26, IR RX = GPIO15.** The G3 = GPIO26 row is an
+So on the Zero: **IR TX = GPIO26, IR RX = GPIO15.** The G3 = GPIO26 row started as an
 inference (it is the pad left over, and "hold HIGH to run" is what a reset line
-looks like); it is confirmed only when the ring flashes on a send and a device
-responds.
+looks like). **Confirmed on hardware 2026-11-12:** with this setup the app
+turned a TV off and the board stayed cool.
 
 ## 7. Current setup
 
