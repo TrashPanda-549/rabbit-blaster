@@ -1,0 +1,11 @@
+#!/bin/sh
+# Runs Rabbit Blaster as root. Installed root-owned at
+# /usr/share/rabbit-blaster/rabbit-blaster-root; /etc/sudoers.d/rabbit-blaster
+# allows exactly this command, with no arguments, without a password.
+# The app switches the header 5V on only around each send, and refuses unless
+# gpio-ir-tx is on GPIO26 (the header's G3 pad) and idles low.
+#
+# cd first: `python3 -m` puts the current directory at the front of its module
+# path, so it must be this root-owned one and not wherever the caller was.
+cd /usr/share/rabbit-blaster || exit 1
+exec /usr/bin/python3 -m rabbitblaster.run_with_power

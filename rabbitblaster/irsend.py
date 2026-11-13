@@ -30,15 +30,30 @@ def _device_can_send(dev: str) -> bool:
         return False
 
 
+def _header_tx_device() -> Optional[str]:
+    """The LIRC device of the gpio-ir-tx node on the header pin (power.IR_TX_GPIO).
+    A unit with built-in IR has a second transmitter; we must not pick that one."""
+    from . import power
+    tag = "gpio-ir-transmitter@%x" % power.IR_TX_GPIO
+    for link in sorted(glob.glob("/sys/class/lirc/lirc*")):
+        if tag in os.path.realpath(link).split("/"):
+            return "/dev/" + os.path.basename(link)
+    return None
+
+
 def find_tx_device() -> str:
-    """The LIRC char device that can transmit. Honors RABBIT_BLASTER_TX, else
-    probes /dev/lirc* for send capability, else falls back to /dev/lirc0."""
+    """The LIRC char device to transmit on. Honors RABBIT_BLASTER_TX, else the
+    header transmitter, else any send-capable /dev/lirc*, else /dev/lirc0."""
     global _tx_device_cache
     env = os.environ.get("RABBIT_BLASTER_TX")
     if env:
         return env
     if _tx_device_cache:
         return _tx_device_cache
+    dev = _header_tx_device()
+    if dev:
+        _tx_device_cache = dev
+        return dev
     for dev in sorted(glob.glob("/dev/lirc*")):
         if _device_can_send(dev):
             _tx_device_cache = dev

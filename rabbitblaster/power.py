@@ -36,19 +36,29 @@ _RAILS_OFF = ("/sys/class/leds/ext_5v_out/brightness",
               "/sys/class/leds/grove_5v_out/brightness")
 
 
-def ir_tx_config():
-    """Return (pin, active_low) of the running gpio-ir-tx, or None."""
+def ir_tx_configs():
+    """Return [(pin, active_low)] for every running gpio-ir-tx node. A unit with
+    built-in IR has its own transmitter node besides the header one."""
     nodes = glob.glob("/proc/device-tree/gpio-ir-transmitter*/gpios")
     nodes += glob.glob("/proc/device-tree/*/gpio-ir-transmitter*/gpios")
+    out = []
     for node in nodes:
         try:
             data = open(node, "rb").read()
             if len(data) < 12 or len(data) % 4:
                 continue
             cells = struct.unpack(">%dI" % (len(data) // 4), data)
-            return cells[-2], bool(cells[-1] & 1)
+            out.append((cells[-2], bool(cells[-1] & 1)))
         except Exception:
             continue
+    return out
+
+
+def ir_tx_config():
+    """Return (pin, active_low) of the gpio-ir-tx on IR_TX_GPIO, or None."""
+    for cfg in ir_tx_configs():
+        if cfg[0] == IR_TX_GPIO:
+            return cfg
     return None
 
 
@@ -72,9 +82,9 @@ def enable() -> bool:
     """Switch the header 5 V on, only if the IR line is confirmed idle-low."""
     if not ir_tx_safe():
         print("power: REFUSING to power the board - gpio-ir-tx is not on GPIO%d "
-              "active-high (cfg=%s). The ring could be held on and overheat. "
+              "active-high (found %s). The ring could be held on and overheat. "
               "Fix config.txt and reboot. Board left unpowered (safe)."
-              % (IR_TX_GPIO, ir_tx_config()), file=sys.stderr)
+              % (IR_TX_GPIO, ir_tx_configs()), file=sys.stderr)
         return False
     for path, val in _RAILS_ON:
         _write(path, val)
