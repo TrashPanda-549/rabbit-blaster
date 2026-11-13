@@ -29,7 +29,13 @@ consumer IR codes from Flipper Zero `.ir` files through an external Rabbit Labs 
 ## Architecture
 
 - `rabbitblaster/irproto.py` — protocol encoders → microsecond pulse trains.
-  Implemented: NEC, NECext, Samsung32, Sony SIRC 12/15/20, RC5, RC6(mode0).
+  Flipper-style: NEC, NECext, Samsung32, Sony SIRC 12/15/20, RC5, RC6(mode0).
+  irdb long tail: NECx, NEC1-y1/y2/y3, Pioneer, Tivo, Aiwa, Dgtec, Proton,
+  Panasonic, JVC-48, Denon-K, Fujitsu, Denon, Sharp, Mitsubishi, Akai, Thomson,
+  RECS80, Velleman, Panasonic_Old, Emerson, ScAtl-6, RCA (4 variants),
+  G.I.Cable, Dish_Network, DirecTV, MCE. These follow IrpTransmogrifier's IRP
+  definitions; `python tests/test_irdb_encoders.py` checks each against a
+  reference rendering from that tool.
 - `rabbitblaster/flipperir.py` — parse Flipper `.ir` files (`parsed` + `raw`).
 - `rabbitblaster/irsend.py` — transmit via `ir-ctl --send` on the send-capable `/dev/lircN`.
 - `rabbitblaster/irdb.py` — read the probonopd/irdb CSV tree (brand -> device ->
@@ -43,10 +49,12 @@ consumer IR codes from Flipper Zero `.ir` files through an external Rabbit Labs 
 ## Code sources
 
 - **irdb** (probonopd/irdb): ~114k codes across 648 brands, stored parametrically
-  (protocol + device/subdevice/function). Rendered on the fly. **73% (83.5k codes)
-  transmittable now** — NEC family, RC5, RC6, Sony 12/15/20, JVC. The rest
-  (Mitsubishi, Aiwa, MCE, Panasonic/Kaseikyo, Denon, Pioneer, …) are shown with a
-  `!` until their encoders are added. `python3 -m rabbitblaster.irdb` prints coverage.
+  (protocol + device/subdevice/function). Rendered on the fly. **96% (109.6k codes)
+  transmittable now.** The rest (Nokia32, NEC1-f16/NEC2-f16, XMP, Blaupunkt,
+  Zenith, Kathrein, …) are shown with a `!`; several of those need a parameter
+  irdb's CSVs don't carry. `python3 -m rabbitblaster.irdb` prints coverage.
+  irdb's "DirecTV" doesn't say which of six variants a code uses; we send the
+  38 kHz short-gap one.
 - **Flipper `.ir` files**: dropped in `~/.rabbit-blaster/remotes` or
   `/usr/share/rabbit-blaster/remotes` (a universal TV remote is bundled).
 
@@ -58,11 +66,12 @@ consumer IR codes from Flipper Zero `.ir` files through an external Rabbit Labs 
 - [x] APPLaunch boot-screen entry + `install.sh` (icon, `video`/`input` groups).
 - [x] Universal TV remote installed (`TV_Universal`, 752 transmittable codes).
 - [x] Full irdb integration: Home -> brand -> device -> function browser with
-      type-to-filter; 83.5k/114k codes renderable; real power codes for
-      Sony/Samsung/LG/Philips/Panasonic/Vizio/Toshiba verified transmitting.
-- [ ] Confirm a real appliance responds (needs a device + its codes in front of it).
-- [ ] Add encoders for the long tail (Mitsubishi, Aiwa, MCE/RC6A, Panasonic/Kaseikyo,
-      Denon, Pioneer, RECS80, Proton, RCA, Sharp, …) to raise coverage past 73%.
+      type-to-filter; 109.6k/114k codes renderable.
+- [x] A real appliance responds: a TV turned off from the app (2026-11-12),
+      board cool.
+- [x] Long-tail encoders (96% coverage), each matched against IrpTransmogrifier
+      and accepted by LIRC on the device. Only the NEC-family TV code has been
+      confirmed against a real appliance; the new protocols have not.
 
 ## Install (on the device)
 

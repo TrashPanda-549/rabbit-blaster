@@ -25,7 +25,58 @@ BASE_CANDIDATES = [
     "/usr/share/irdb/codes",
 ]
 
-_NEC = ("nec", "nec1", "nec2", "necx1", "necx2")
+ip = irproto
+
+
+def _sony20(d, s, f):
+    return ip.sirc((d & 0x1F) | (((s & 0xFF) << 5) if s >= 0 else 0), f, 20)
+
+
+# irdb protocol name (lower-case) -> encoder(device, subdevice, function).
+_ENCODERS = {
+    "nec": ip.build_nec, "nec1": ip.build_nec, "nec2": ip.build_nec,
+    "necx1": ip.necx, "necx2": ip.necx,
+    "nec1-y1": lambda d, s, f: ip.nec_yamaha(d, s, f, 1),
+    "nec1-y2": lambda d, s, f: ip.nec_yamaha(d, s, f, 2),
+    "nec1-y3": lambda d, s, f: ip.nec_yamaha(d, s, f, 3),
+    "pioneer": ip.pioneer,
+    "tivo unit=0": lambda d, s, f: ip.tivo(f, 0),
+    "tivo unit=1": lambda d, s, f: ip.tivo(f, 1),
+    "aiwa": ip.aiwa,
+    "dgtec": lambda d, s, f: ip.dgtec(d, f),
+    "proton": lambda d, s, f: ip.proton(d, f),
+    "panasonic": ip.panasonic,
+    "jvc-48": ip.jvc48,
+    "denon-k": ip.denon_k,
+    "fujitsu": ip.fujitsu,
+    "denon": lambda d, s, f: ip.denon(d, f),
+    "denon{1}": lambda d, s, f: ip.denon(d, f),
+    "sharp": lambda d, s, f: ip.sharp(d, f),
+    "sharp{1}": lambda d, s, f: ip.sharp(d, f),
+    "mitsubishi": lambda d, s, f: ip.mitsubishi(d, f),
+    "akai": lambda d, s, f: ip.akai(d, f),
+    "thomson": lambda d, s, f: ip.thomson(d, f),
+    "recs80": lambda d, s, f: ip.recs80(d, f),
+    "velleman": lambda d, s, f: ip.velleman(d, f),
+    "panasonic_old": lambda d, s, f: ip.panasonic_old(d, f),
+    "emerson": lambda d, s, f: ip.emerson(d, f),
+    "scatl-6": lambda d, s, f: ip.scatl6(d, f),
+    "rca": lambda d, s, f: ip.rca(d, f),
+    "rca-38": lambda d, s, f: ip.rca(d, f, carrier=38700),
+    "rca(old)": lambda d, s, f: ip.rca(d, f, old=True),
+    "rca-38(old)": lambda d, s, f: ip.rca(d, f, carrier=38700, old=True),
+    "g.i.cable": lambda d, s, f: ip.gi_cable(d, f),
+    "dish_network": ip.dish_network,
+    "directv": lambda d, s, f: ip.directv(d, f),
+    "mce": ip.mce,
+    "rc5": lambda d, s, f: ip.rc5(d, f),
+    "rc6": lambda d, s, f: ip.rc6(d, f),
+    "sony12": lambda d, s, f: ip.sirc(d, f, 12),
+    "sony15": lambda d, s, f: ip.sirc(d, f, 15),
+    "sony20": _sony20,
+    "jvc": lambda d, s, f: ip.jvc(d, f),
+    "jvc{2}": lambda d, s, f: ip.jvc(d, f),
+}
 
 
 def base_dir():
@@ -40,30 +91,15 @@ def available():
 
 
 def supported(protocol) -> bool:
-    pl = (protocol or "").strip().lower()
-    return pl in _NEC or pl in ("rc5", "rc6", "sony12", "sony15", "sony20", "jvc")
+    return (protocol or "").strip().lower() in _ENCODERS
 
 
 def render(protocol, device, subdevice, function):
     """Return (carrier_hz, durations[us]) or None if unsupported."""
-    pl = (protocol or "").strip().lower()
-    D, S, F = int(device), int(subdevice), int(function)
-    if pl in _NEC:
-        return irproto.build_nec(D, S, F)
-    if pl == "rc5":
-        return irproto.rc5(D, F)
-    if pl == "rc6":
-        return irproto.rc6(D, F)
-    if pl == "sony12":
-        return irproto.sirc(D, F, 12)
-    if pl == "sony15":
-        return irproto.sirc(D, F, 15)
-    if pl == "sony20":
-        addr = (D & 0x1F) | (((S & 0xFF) << 5) if S >= 0 else 0)
-        return irproto.sirc(addr, F, 20)
-    if pl == "jvc":
-        return irproto.jvc(D, F)
-    return None
+    enc = _ENCODERS.get((protocol or "").strip().lower())
+    if enc is None:
+        return None
+    return enc(int(device), int(subdevice), int(function))
 
 
 def render_row(row: Row):
