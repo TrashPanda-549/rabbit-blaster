@@ -106,13 +106,14 @@ That single fact explains everything we saw:
    actually lit only a *small fraction* of the time → the board self-limits and
    stays cool. **Hold the data line DC-high and the LEDs are full-on 100 % →
    overheat.**
-2. **Why the ring was a solid, hot, non-flickering light:** the data line was
-   held **high and un-modulated**. The old config had `gpio-ir-tx` on **GPIO14**
-   (the mini-UART TX, which *idles high*), and the board's real IR-in pad was
-   additionally held high by the **`gpio-ir` RX overlay's pull-up**. Constant
-   drive = no flicker, maximum heat.
-3. **Why nothing reached the TV:** our nicely modulated 38 kHz was coming out a
-   pin the board doesn't read, while the pin it *does* read just sat high.
+2. **Why the ring was a solid, hot, non-flickering light:** the board's IR
+   input is the header's G3 pad, which on the Zero is **GPIO26** (section 6).
+   The app was holding GPIO26 **HIGH** as a "power enable", copied from M5's cap
+   drivers. For this board that is the data line held high and un-modulated:
+   constant drive, no flicker, maximum heat.
+3. **Why nothing reached the TV:** the modulated 38 kHz was coming out GPIO14
+   (and GPIO12 before that), pins the board doesn't read, while the pin it
+   *does* read just sat high.
 
 ### The correct drive scheme (what the research says to do)
 
@@ -132,57 +133,50 @@ The instinct came from the overheating, but the overheating's real cause is the
 steady 5 V + the correct idle-low modulated data pin *first*; only consider a
 power-side current limit if it still runs hot (it shouldn't).
 
-## 6. The one open question: which Pi GPIO is the board's IR-in
+## 6. The Zero's header pads: G3 = GPIO26
 
-This is the only thing left to nail, and it must be *read*, not guessed:
+The vendor documents the COBRA Commander as **transmit on pad "G3", receive on
+pad "G15"**, 5 V. On the ADV those labels are ESP32 GPIO numbers; the Zero is a
+Raspberry Pi, so the same physical pads carry different BCM numbers. No pinout
+is published for the Zero, so the map below is worked out from two sources: the
+ADV header's documented pad roles, and the pins M5's own Zero cap drivers use
+(`apps/raspyjack/payloads/_cc1101_driver.py`, `_st25r_driver.py`).
 
-- **Vendor docs (Cardputer ADV):** transmit on header pad **"G3"**, receive on
-  **"G15"**, 5 V. On the ADV (an ESP32) those silk labels equal ESP32 GPIO
-  numbers.
-- **The Zero is a Raspberry Pi.** The *same physical header pads* map to
-  *different BCM GPIO numbers*. So **"G3" on the Zero is not necessarily BCM
-  GPIO3**, and "G15" is not necessarily BCM GPIO15.
-- "TX = 15" (from testing) and the vendor's "G3 transmit / G15 receive" only
-  reconcile once we have the Zero's **pad → BCM map**. That is readable straight
-  off the device — `gpioinfo` line names, the `cardputerzero` overlay, and
-  `pinctrl` — with **no board power and no guessing.** (TODO: capture this; the
-  device was rebooting at the time of writing.)
+| ADV pad (role) | Zero BCM | Evidence on the Zero |
+|----------------|----------|----------------------|
+| G13 / G15 (UART TX / RX) | GPIO14 / GPIO15 | LoRa cap GPS on `/dev/ttyS0`; CC1101 uses 14 and 15 |
+| G4 (INT) | GPIO23 | NFC driver IRQ pin |
+| G6 (BUSY) | GPIO22 | third SPI chip-select (`spi0 CS2`) |
+| G5 (CS), G40/G14/G39 (SPI) | GPIO7, GPIO11/10/9 | CC1101 on `spi0.1` |
+| **G3 (RESET)** | **GPIO26** | cap drivers hold it HIGH and call it "power" |
 
-Once the pad→BCM map is in hand: set `dtoverlay=gpio-ir-tx,gpio_pin=<that BCM>`,
-remove any `gpio-ir` RX pull-up from the *same* pad, send a known NEC code at
-38 kHz/33 % with 5 V steady, and confirm on the **front/selfie camera** (rear
-cameras have an IR filter) that the ring flickers, plus that the TV responds.
+Header power, per the same drivers: `ext_usb_gpio_fun=0` and `ext_5v_out=1`.
 
-## 7. Bring-up checklist — make the Zero drive it exactly like the ADV
+So on the Zero: **IR TX = GPIO26, IR RX = GPIO15.** The G3 = GPIO26 row is an
+inference (it is the pad left over, and "hold HIGH to run" is what a reset line
+looks like); it is confirmed only when the ring flashes on a send and a device
+responds.
 
-The app code is already in the ADV model (steady 5 V, modulated line, no
-power-PWM): `power.py` enables 5 V + GPIO26 and refuses unless `gpio-ir-tx` is
-active-high (idle low); `irsend.py` auto-finds the send-capable `/dev/lircN` and
-sends 38 kHz/33 %. The only thing left is the device-side pin. Steps (need the
-Zero in hand):
+## 7. Current setup
 
-1. **Read the pad→BCM map** (no board power): `gpioinfo | grep -vi unnamed` and
-   `pinctrl` — find which BCM line is wired to the **G3** transmit pad (and
-   **G15** receive). M5 may have named the lines ("G3"/"G15"); otherwise match by
-   the `cardputerzero` overlay.
-2. **Edit `/boot/firmware/config.txt`** (back it up first):
-   - `enable_uart=0` (already set — keeps the UART off the TX pad)
-   - `dtoverlay=gpio-ir-tx,gpio_pin=<G3-BCM>`  ← TX, active-high
-   - `dtoverlay=gpio-ir,gpio_pin=<G15-BCM>,gpio_pull=up`  ← RX (optional)
-   - Make sure `<G3-BCM>` isn't also claimed by I²C/SPI or the cardputerzero
-     overlay (BCM2/3 are the I²C bus the keyboard uses — avoid).
-3. **Reboot.**
-4. **Pin the interlock:** set `RB_IR_TX_GPIO=<G3-BCM>` in the launcher
-   (`/usr/share/APPLaunch/bin/rabbit-blaster`) so `power.enable()` only powers up
-   when gpio-ir-tx is on that exact pad.
-5. **Sanity-check:** `ir-ctl -d /dev/lircN --features` shows "can send" on the TX
-   node; `python3 -c "from rabbitblaster import power; print(power.ir_tx_safe())"`
-   prints `True`.
-6. **Blast test:** seat the board, run the app, send a known TV power code. Watch
-   the ring on a **front/selfie camera** (rear cams filter IR) — brief flicker,
-   board cool, TV reacts. If it flickers but the TV ignores it, it's a
-   code/brand issue (try another code); if the ring goes solid or hot, the TX
-   pad/BCM is still wrong — recheck step 1.
+`/boot/firmware/config.txt` (previous version saved as
+`config.txt.rb.pre-gpio26.bak`):
+
+```
+enable_uart=0
+dtoverlay=gpio-ir,gpio_pin=15,gpio_pull=up
+dtoverlay=gpio-ir-tx,gpio_pin=26
+```
+
+`power.py` switches only the header 5 V and never drives GPIO26; its interlock
+refuses unless `gpio-ir-tx` is on GPIO26 active-high (`RB_IR_TX_GPIO` overrides
+the pin). `irsend.py` finds the send-capable `/dev/lircN` itself.
+
+**Blast test:** seat the board, open the app, send a known TV power code, and
+watch the ring through a **front/selfie camera** (rear cameras filter IR).
+Expected: a brief flash per send, board cool, ring dark otherwise. A flash that
+the TV ignores is a code problem (try another code). A ring that stays on or
+gets hot means the pad map above is wrong: quit the app and unplug the board.
 
 ---
 

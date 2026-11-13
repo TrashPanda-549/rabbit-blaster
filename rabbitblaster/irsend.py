@@ -15,6 +15,9 @@ import subprocess
 import tempfile
 from typing import List, Optional
 
+# None means "auto-detect at send time" (see find_tx_device).
+DEFAULT_DEVICE: Optional[str] = os.environ.get("RABBIT_BLASTER_TX")
+
 _tx_device_cache: Optional[str] = None
 
 

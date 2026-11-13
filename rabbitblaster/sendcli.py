@@ -61,7 +61,8 @@ def main(argv=None):
     except irsend.IRError as e:
         print("TX failed: %s" % e, file=sys.stderr)
         return 1
-    print("sent %r via %s (x%d)" % (sig.name, args.device, args.repeats))
+    print("sent %r via %s (x%d)"
+          % (sig.name, args.device or irsend.find_tx_device(), args.repeats))
     return 0
 
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Rabbit Blaster launcher (invoked by APPLaunch via its .desktop entry).
-# Powers the Rabbit Labs COBRA Commander (5V) for the app's lifetime via the
-# power-managed wrapper; root is needed for the 5V rails + GPIO26. The wrapper's
-# interlock refuses to power the board unless gpio-ir-tx is on GPIO14
-# active-high (idle low = LED ring off), so a bad config can't overheat it.
+# Root is needed for the header 5V switches. The app powers the Rabbit Labs
+# COBRA Commander only around each send, and its interlock refuses unless
+# gpio-ir-tx is on GPIO26 (the header's G3 pad) active-high, so the LED ring
+# idles off and a bad config can't overheat it.
 export PYTHONPATH="/usr/share/rabbit-blaster:${PYTHONPATH}"
 exec sudo -n env PYTHONPATH="/usr/share/rabbit-blaster:${PYTHONPATH}" \
      python3 -m rabbitblaster.run_with_power "$@"
