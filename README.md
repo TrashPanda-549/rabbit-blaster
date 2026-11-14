@@ -9,6 +9,9 @@ code.
 - A universal TV remote (the Flipper Zero's `tv.ir`).
 - Any Flipper Zero `.ir` file you add.
 
+Thanks to [Rabbit Labs](https://rabbit-labs.com), who supplied the COBRA
+Commander board this app was built and tested with.
+
 ## What you need
 
 - An M5 Cardputer Zero running M5's stock system (the one with the APPLaunch boot screen), connected to Wi-Fi.
@@ -113,6 +116,7 @@ Command-line sending:
 
 ## Credits and licences
 
+- [Rabbit Labs](https://rabbit-labs.com) supplied the COBRA Commander board used to develop and test Rabbit Blaster.
 - The code in this repo is MIT licensed; see [LICENSE](LICENSE).
 - The Rabbit Labs hare logo (`share/images/rabbit-labs-hare.png`) belongs to Rabbit Labs and is used with their permission. It is not covered by the MIT licence.
 - [irdb](https://github.com/probonopd/irdb) by probonopd and the Flipper Zero firmware's `tv.ir` are downloaded by the installer and are not part of this repo; each has its own licence.
